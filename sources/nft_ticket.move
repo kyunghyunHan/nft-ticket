@@ -10,6 +10,12 @@ module nft_ticket::ticket{
 
     use aptos_token::token;
 
+   const EVENUE_NOT_CREATED: u64 = 0;
+    const EINVALID_VENUE_OWNER: u64 = 1;
+    const EINVALID_VECTOR_LENGTH: u64 = 2;
+    const ETICKET_NOT_FOUND: u64 = 3;
+    const ETICKETS_NOT_AVAILABLE: u64 = 4;
+    const EINVALID_BALANCE: u64 = 5;
 
 
   struct Ticket has store{
@@ -48,4 +54,97 @@ module nft_ticket::ticket{
         vector<bool>[false,false,false]
     )
   }
+
+
+
+    public entry fun create_ticket<CoinType>(venue_owner: &signer, venue_resource: address, name: vector<u8>, description: vector<u8>, uri: vector<u8>, max_quantity: u64, price: u64) acquires Venue {
+        assert!(exists<Venue<CoinType>>(venue_resource), EVENUE_NOT_CREATED);
+       
+        let venue_owner_addr = signer::address_of(venue_owner); 
+        let venue_info = borrow_global_mut<Venue<CoinType>>(venue_resource);
+        assert!(venue_info.owner == venue_owner_addr, EINVALID_VENUE_OWNER);
+
+        let venue_resource_signer = account::create_signer_with_capability(&venue_info.resource_signer_cap);
+
+        // Creating a token data for this particular type of ticket which would be used to mint NFTs
+        let token_mutability = token::create_token_mutability_config(&vector<bool>[false, false, false, false, false]);
+
+
+  let token_data = token::create_tokendata(
+            &venue_resource_signer,
+            string::utf8(venue_info.name), // Collection Name
+            string::utf8(name), // Token Name
+            string::utf8(description), // Token description
+            max_quantity,
+            string::utf8(uri), 
+            venue_info.owner, // royalty payee address
+            100,
+            5,
+            token_mutability,
+            vector<string::String>[],
+            vector<vector<u8>>[],
+            vector<string::String>[]
+        );
+
+
+    let ticket= Ticket{
+        name,
+        description,
+        max_quantity,
+        price,
+        available:max_quantity,
+        token_data
+    };
+
+    vector::push_back(&mut venue_info.tickets,ticket);
+
+
+  }
+
+    public entry fun purchase_ticket<CoinType>(buyer: &signer, venue_resource: address, name: vector<u8>, quantity: u64) acquires Venue {
+        assert!(exists<Venue<CoinType>>(venue_resource), EVENUE_NOT_CREATED);
+
+        let venue_info = borrow_global_mut<Venue<CoinType>>(venue_resource);
+        let ticket_count = vector::length(&venue_info.tickets);
+
+        let i = 0;
+        while (i < ticket_count) {
+            let current = vector::borrow<Ticket>(&venue_info.tickets, i);
+            if (current.name == name) {
+                break
+            };
+            i = i +1;
+        };
+        assert!(i != ticket_count, ETICKET_NOT_FOUND);
+
+        let ticket = vector::borrow_mut<Ticket>(&mut venue_info.tickets, i);
+        assert!(ticket.available >= quantity, ETICKETS_NOT_AVAILABLE); 
+
+        let total_price = ticket.price * quantity;
+        coin::transfer<CoinType>(buyer, venue_info.owner, total_price);
+        ticket.available = ticket.available - quantity;
+
+        let venue_resource_signer = account::create_signer_with_capability(&venue_info.resource_signer_cap);
+
+        let buyer_addr = signer::address_of(buyer);
+
+        // the buyer should opt in direct transfer for the NFT to be minted
+        token::opt_in_direct_transfer(buyer, true);
+
+        // Mint the NFT to the buyer account
+        token::mint_token_to(&venue_resource_signer, buyer_addr, ticket.token_data, quantity);
+    }
+
+
+
+    #[test_only]
+    public fun get_resource_account(source: address, seed: vector<u8>)  : address {
+        use std::hash;
+        use aptos_std::from_bcs;
+        use std::bcs;
+        let bytes = bcs::to_bytes(&source);
+        vector::append(&mut bytes, seed);
+        from_bcs::to_address(hash::sha3_256(bytes))
+    }
+
 }
