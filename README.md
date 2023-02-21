@@ -3,7 +3,7 @@
 ## mint
 
 ```
-aptos move run  --function-id default::bsc::mint_coin --args address:"발매자" u64:10000000
+aptos move run  --function-id default::ticket::create_venue --args string:name string:desc string:uri  --type-args 0x1::aptos_coin::AptosCoin
 ```
 
 - dkfkfak
